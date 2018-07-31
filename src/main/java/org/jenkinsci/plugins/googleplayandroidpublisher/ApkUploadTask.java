@@ -108,7 +108,25 @@ class ApkUploadTask extends TrackPublisherTask<Boolean> {
             // If not, we can upload the file
             FileContent apk =
                     new FileContent("application/vnd.android.package-archive", new File(apkFile.getRemote()));
-            Apk uploadedApk = editService.apks().upload(applicationId, editId, apk).execute();
+            // Retry after 30s for upload since we are getting java.net.SocketTimeoutException: Read timed out frequently
+            int maxRetries = 5, counter = 1;
+            boolean uploadSuccessful = false;
+            Apk uploadedApk = null;
+            while (!uploadSuccessful) {
+                try {
+                    uploadedApk = editService.apks().upload(applicationId, editId, apk).execute();
+                    uploadSuccessful = true;
+                } catch (SocketTimeoutException e) {
+                    // The API is quite prone to timing out for no apparent reason
+                    logger.println(String.format("- SocketTimeoutException occurred while uploading apk: %s", e));
+                    counter++;
+                    if (counter > maxRetries) {
+                        logger.println(String.format("Upload failed after 5 retries for: %s", getRelativeFileName(apkFile)));
+                        throw e;
+                    }
+                    Thread.sleep(30000);
+                }
+            }
             uploadedVersionCodes.add(uploadedApk.getVersionCode());
 
             // Upload the ProGuard mapping file for this APK, if there is one
